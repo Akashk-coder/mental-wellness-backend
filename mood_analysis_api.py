@@ -1,44 +1,24 @@
-# mood_analysis_api.py
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from textblob import TextBlob
 import openai
-import json
 import os
+import json
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for frontend access
+CORS(app)
 
-# 🔐 Securely fetch API key and validate
+# Load OpenAI API key from environment variable
 api_key = os.environ.get("OPENAI_API_KEY")
 if not api_key:
     raise Exception("OPENAI_API_KEY environment variable is not set.")
 openai.api_key = api_key
 
-JOURNAL_LOG_PATH = "journal_log.json"
+# Path to journal history file
+JOURNAL_LOG_PATH = "journal_history.json"
 
-# Save journal entries
-def save_journal_entry(entry, mood):
-    log = []
-    if os.path.exists(JOURNAL_LOG_PATH):
-        with open(JOURNAL_LOG_PATH, 'r') as f:
-            try:
-                log = json.load(f)
-            except json.JSONDecodeError:
-                log = []
-
-    log.append({
-        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'entry': entry,
-        'mood': mood
-    })
-
-    with open(JOURNAL_LOG_PATH, 'w') as f:
-        json.dump(log, f, indent=2)
-
-# Analyze Mood API
+# Route to analyze mood
 @app.route('/analyze', methods=['POST'])
 def analyze_mood():
     data = request.get_json()
@@ -55,9 +35,27 @@ def analyze_mood():
         tip = "You're doing great! Celebrate your wins today."
     elif polarity < -0.2:
         mood = "Negative"
-        tip = "It's okay to have tough days. Consider some relaxation."
+        tip = "It's okay to have tough days. Consider some relaxation or talk to someone you trust."
 
-    save_journal_entry(journal_entry, mood)
+    # Save journal entry with timestamp
+    entry_data = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "entry": journal_entry,
+        "mood": mood
+    }
+
+    if os.path.exists(JOURNAL_LOG_PATH):
+        with open(JOURNAL_LOG_PATH, 'r') as f:
+            try:
+                history = json.load(f)
+            except:
+                history = []
+    else:
+        history = []
+
+    history.append(entry_data)
+    with open(JOURNAL_LOG_PATH, 'w') as f:
+        json.dump(history, f)
 
     return jsonify({
         'mood': mood,
@@ -65,7 +63,20 @@ def analyze_mood():
         'tip': tip
     })
 
-# Therapist Chatbot API
+# Route to view past entries for mood chart
+@app.route('/history', methods=['GET'])
+def get_history():
+    if os.path.exists(JOURNAL_LOG_PATH):
+        with open(JOURNAL_LOG_PATH, 'r') as f:
+            try:
+                history = json.load(f)
+            except:
+                history = []
+    else:
+        history = []
+    return jsonify(history)
+
+# AI therapist chatbot route
 @app.route('/chat', methods=['POST'])
 def therapist_chat():
     data = request.get_json()
@@ -86,7 +97,7 @@ def therapist_chat():
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4",  # or "gpt-3.5-turbo" if needed
             messages=[
                 {"role": "system", "content": "You are a kind and empathetic mental wellness therapist."},
                 {"role": "user", "content": prompt}
@@ -96,27 +107,8 @@ def therapist_chat():
         return jsonify({ "reply": reply })
 
     except Exception as e:
-        print("OpenAI Error:", e)
+        print("OpenAI Error:", str(e))  # ⚠️ Log the actual OpenAI error
         return jsonify({ "reply": "Sorry, I had trouble responding right now." })
 
-# Mood History for Chart
-@app.route('/history', methods=['GET'])
-def get_history():
-    if not os.path.exists(JOURNAL_LOG_PATH):
-        return jsonify([])
-
-    try:
-        with open(JOURNAL_LOG_PATH, 'r') as f:
-            log = json.load(f)
-            return jsonify([
-                {
-                    'timestamp': entry['timestamp'],
-                    'mood': entry['mood']
-                } for entry in log
-            ])
-    except:
-        return jsonify([])
-
-# Run server
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000, debug=True)
